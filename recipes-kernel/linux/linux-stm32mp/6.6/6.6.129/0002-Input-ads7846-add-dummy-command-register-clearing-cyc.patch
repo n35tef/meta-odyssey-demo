@@ -1,0 +1,54 @@
+From: meta-odyssey-demo <build@local>
+Date: Tue, 22 Sep 2026 12:00:00 +0200
+Subject: [PATCH] Input: ads7846 - add dummy command register clearing cycle
+
+Backport of 781a07da9bb9 ("Input: ads7846 - add dummy command register
+clearing cycle") and its two fixes 470a271627e8 and 856668312685, squashed
+because the first alone introduces an out-of-bounds write in struct ser_req.
+Without it the XPT2046 on the Waveshare panel locks up after probe and never
+asserts nPENIRQ (same failure upstream saw on STM32MP135F).
+
+Upstream-Status: Backport [v6.7 781a07da9bb9 470a271627e8 856668312685]
+
+diff --git a/drivers/input/touchscreen/ads7846.c b/drivers/input/touchscreen/ads7846.c
+--- a/drivers/input/touchscreen/ads7846.c
++++ b/drivers/input/touchscreen/ads7846.c
+@@ -328,14 +328,14 @@ struct ser_req {
+ 	u8			ref_on;
+ 	u8			command;
+ 	u8			ref_off;
+-	u16			scratch;
+ 	struct spi_message	msg;
+-	struct spi_transfer	xfer[6];
++	struct spi_transfer	xfer[8];
+ 	/*
+ 	 * DMA (thus cache coherency maintenance) requires the
+ 	 * transfer buffers to live in their own cache lines.
+ 	 */
+ 	__be16 sample ____cacheline_aligned;
++	u16			scratch;
+ };
+
+ struct ads7845_ser_req {
+@@ -404,9 +404,18 @@ static int ads7846_read12_ser(struct device *dev, unsigned command)
+
+ 	req->xfer[5].rx_buf = &req->scratch;
+ 	req->xfer[5].len = 2;
+-	CS_CHANGE(req->xfer[5]);
+ 	spi_message_add_tail(&req->xfer[5], &req->msg);
+
++	/* clear the command register */
++	req->xfer[6].rx_buf = &req->scratch;
++	req->xfer[6].len = 1;
++	spi_message_add_tail(&req->xfer[6], &req->msg);
++
++	req->xfer[7].rx_buf = &req->scratch;
++	req->xfer[7].len = 2;
++	CS_CHANGE(req->xfer[7]);
++	spi_message_add_tail(&req->xfer[7], &req->msg);
++
+ 	mutex_lock(&ts->lock);
+ 	ads7846_stop(ts);
+ 	status = spi_sync(spi, &req->msg);
+--
+2.43.0

@@ -1,0 +1,51 @@
+From: meta-odyssey-demo <build@local>
+Date: Tue, 22 Sep 2026 12:00:00 +0200
+Subject: [PATCH] Input: ads7846 - arm nPENIRQ with an X-position bootstrap read
+
+Even with the dummy clearing cycle, the XPT2046 on this panel never asserts
+nPENIRQ after probe. Bench tests over spidev showed it only arms when the
+last conversion before power-down is an X-position read (0xD0) sent as one
+full-duplex transfer - not the Y-position/PWRDOWN the driver's bootstrap
+ends on. Replace the probe-time vaux bootstrap with that conversion; the
+IRQ-driven sampling path keeps nPENIRQ armed afterwards. Board-specific.
+
+Upstream-Status: Inappropriate [board-specific quirk]
+
+diff --git a/drivers/input/touchscreen/ads7846.c b/drivers/input/touchscreen/ads7846.c
+--- a/drivers/input/touchscreen/ads7846.c
++++ b/drivers/input/touchscreen/ads7846.c
+@@ -1371,10 +1371,29 @@
+ 	 * Take a first sample, leaving nPENIRQ active and vREF off; avoid
+ 	 * the touchscreen, in case it's not connected.
+ 	 */
+-	if (ts->model == 7845)
++	if (ts->model == 7845) {
+ 		ads7845_read12_ser(dev, PWRDOWN);
+-	else
+-		(void) ads7846_read12_ser(dev, READ_12BIT_SER(vaux));
++	} else {
++		/*
++		 * This XPT2046 only arms nPENIRQ after a conversion ending on the
++		 * X-position channel, sent as one full-duplex transfer; the default
++		 * Y-position/PWRDOWN bootstrap leaves it unarmed. Do it once at probe.
++		 */
++		{
++			struct ads7846_buf bootstrap = {
++				.cmd = READ_12BIT_DFR(x, 0, 0),
++			};
++			struct spi_transfer xfer = {
++				.tx_buf = &bootstrap,
++				.rx_buf = &bootstrap,
++				.len    = sizeof(bootstrap),
++			};
++			struct spi_message m;
++
++			spi_message_init_with_transfers(&m, &xfer, 1);
++			spi_sync(spi, &m);
++		}
++	}
+ 
+ 	err = devm_device_add_group(dev, &ads784x_attr_group);
+ 	if (err)
+--
+2.43.0

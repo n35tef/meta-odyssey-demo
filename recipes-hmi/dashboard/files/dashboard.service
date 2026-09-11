@@ -1,0 +1,24 @@
+[Unit]
+Description=Odyssey dashboard (LVGL, ILI9486 framebuffer + XPT2046 touch)
+# fbtft / ads7846 come up via udev during this target
+After=systemd-udev-settle.service local-fs.target
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=simple
+Environment=LV_VIDEO_CARD=/dev/fb0
+# --- touch calibration (tune on-target, then `systemctl daemon-reload && restart`) ---
+# Find values: set LV_TOUCH_RAW=1, restart, touch the 4 corners, read the raw
+# numbers off the panel, then set LV_TOUCH_CAL="min_x min_y max_x max_y" and
+# remove LV_TOUCH_RAW. Swap a pair to invert that axis; LV_TOUCH_SWAP=1 swaps X/Y.
+#Environment=LV_TOUCH_RAW=1
+#Environment=LV_TOUCH_CAL=200 200 3900 3900
+#Environment=LV_TOUCH_SWAP=1
+ExecStart=/usr/bin/dashboard
+Restart=always
+RestartSec=2
+# quiet the kernel console so it doesn't scribble over the panel
+ExecStartPre=-/bin/sh -c 'echo 0 > /sys/class/vtconsole/vtcon1/bind 2>/dev/null; echo 0 > /proc/sys/kernel/printk 2>/dev/null; true'
+
+[Install]
+WantedBy=multi-user.target
